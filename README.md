@@ -6,6 +6,12 @@ A real-time sleep analytics dashboard with direct Eight Sleep API integration, p
 ![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-red)
 ![OAuth2](https://img.shields.io/badge/Auth-OAuth2-green)
 
+## Preview
+
+![Dashboard Overview](assets/dashboard-1.png)
+
+![Charts and Correlations](assets/dashboard-2.png)
+
 ## What Makes This Unique
 
 | Feature | Standard Sleep Apps | This Dashboard |
