@@ -127,6 +127,9 @@ def create_sleep_timeline(df: pd.DataFrame) -> go.Figure:
         deep = row.get("deep_minutes", 0) or 0
         rem = row.get("rem_minutes", 0) or 0
         light = row.get("light_minutes", 0) or 0
+        total_mins = duration * 60 if duration > 0 else 1
+        deep_pct = (deep / total_mins) * 100
+        rem_pct = (rem / total_mins) * 100
 
         date_label = night.strftime("%a %-m/%-d")
         dates.append(date_label)
@@ -136,7 +139,7 @@ def create_sleep_timeline(df: pd.DataFrame) -> go.Figure:
         hover_texts.append(
             f"<b>{night.strftime('%A, %b %-d')}</b><br>"
             f"<b>{duration:.1f} hours</b><br>"
-            f"Deep: {deep:.0f}m | REM: {rem:.0f}m | Light: {light:.0f}m"
+            f"Deep: {deep:.0f}m ({deep_pct:.0f}%) | REM: {rem:.0f}m ({rem_pct:.0f}%) | Light: {light:.0f}m"
         )
 
     fig.add_trace(go.Bar(
@@ -459,11 +462,14 @@ def main():
 
     with col2:
         deep = last_night.get("deep_minutes", 0) or 0
-        st.metric("Deep Sleep", f"{deep:.0f}m")
+        total_sleep = duration * 60 if duration > 0 else 1
+        deep_pct = (deep / total_sleep) * 100
+        st.metric("Deep Sleep", f"{deep:.0f}m ({deep_pct:.0f}%)")
 
     with col3:
         rem = last_night.get("rem_minutes", 0) or 0
-        st.metric("REM Sleep", f"{rem:.0f}m")
+        rem_pct = (rem / total_sleep) * 100
+        st.metric("REM Sleep", f"{rem:.0f}m ({rem_pct:.0f}%)")
 
     with col4:
         hr = last_night.get("heart_rate_avg")
@@ -486,11 +492,14 @@ def main():
 
     with col2:
         avg_deep = df["deep_minutes"].mean()
-        st.metric("Avg Deep", f"{avg_deep:.0f}m")
+        avg_total = avg_dur * 60 if avg_dur > 0 else 1
+        avg_deep_pct = (avg_deep / avg_total) * 100
+        st.metric("Avg Deep", f"{avg_deep:.0f}m ({avg_deep_pct:.0f}%)")
 
     with col3:
         avg_rem = df["rem_minutes"].mean()
-        st.metric("Avg REM", f"{avg_rem:.0f}m")
+        avg_rem_pct = (avg_rem / avg_total) * 100
+        st.metric("Avg REM", f"{avg_rem:.0f}m ({avg_rem_pct:.0f}%)")
 
     with col4:
         avg_hr = df["heart_rate_avg"].dropna().mean()
