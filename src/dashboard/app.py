@@ -221,23 +221,29 @@ def create_hypnogram(row: pd.Series) -> go.Figure:
     stage_map = {"deep": 0, "rem": 1, "light": 2, "awake": 3}
     stage_colors = {"deep": COLOR_DEEP, "rem": COLOR_REM, "light": COLOR_LIGHT, "awake": COLOR_AWAKE}
 
-    # Build step chart data
-    x_vals = []
-    y_vals = []
-    colors = []
+    # Build step chart data for connecting line
+    line_x = []
+    line_y = []
 
     for stage in stages:
         stage_type = stage["stage"]
         if stage_type not in stage_map:
             continue
         y_val = stage_map[stage_type]
+        line_x.extend([stage["start_min"], stage["end_min"]])
+        line_y.extend([y_val, y_val])
 
-        # Add horizontal line for this stage
-        x_vals.extend([stage["start_min"], stage["end_min"]])
-        y_vals.extend([y_val, y_val])
-        colors.append(stage_colors.get(stage_type, "#888"))
+    # Add connecting step line (background)
+    fig.add_trace(go.Scatter(
+        x=line_x,
+        y=line_y,
+        mode="lines",
+        line=dict(color="rgba(255,255,255,0.4)", width=2, shape="hv"),
+        hoverinfo="skip",
+        showlegend=False,
+    ))
 
-    # Create colored segments for each stage
+    # Create colored segments for each stage (foreground)
     for stage in stages:
         stage_type = stage["stage"]
         if stage_type not in stage_map:
@@ -247,7 +253,7 @@ def create_hypnogram(row: pd.Series) -> go.Figure:
             x=[stage["start_min"], stage["end_min"]],
             y=[stage_map[stage_type], stage_map[stage_type]],
             mode="lines",
-            line=dict(color=stage_colors.get(stage_type, "#888"), width=8),
+            line=dict(color=stage_colors.get(stage_type, "#888"), width=6),
             hovertemplate=f"{stage_type.title()}: {stage['duration_min']:.0f}m<extra></extra>",
             showlegend=False,
         ))
