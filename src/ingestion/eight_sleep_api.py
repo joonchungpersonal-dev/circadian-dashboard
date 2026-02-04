@@ -270,6 +270,21 @@ class EightSleepClient:
 
             total_sleep_mins = sum(v for k, v in stage_durations.items() if k != "awake")
 
+            # Build stage sequence for hypnogram
+            stage_sequence = []
+            cumulative_mins = 0
+            for stage in stages:
+                stage_type = stage.get("stage", "").lower()
+                duration_secs = stage.get("duration", 0)
+                duration_mins = duration_secs / 60
+                stage_sequence.append({
+                    "stage": stage_type,
+                    "start_min": cumulative_mins,
+                    "end_min": cumulative_mins + duration_mins,
+                    "duration_min": duration_mins,
+                })
+                cumulative_mins += duration_mins
+
             sessions.append({
                 "night_date": session_start.date() - timedelta(days=1),  # Assign to previous night
                 "session_start": session_start,
@@ -288,6 +303,7 @@ class EightSleepClient:
                 "toss_turns": interval.get("tnt", 0),
                 "sleep_score": score,
                 "source": "eight_sleep_api",
+                "stages": stage_sequence,  # Raw stage sequence for hypnogram
             })
 
         df = pd.DataFrame(sessions)

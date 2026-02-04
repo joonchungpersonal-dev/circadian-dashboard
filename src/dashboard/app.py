@@ -198,48 +198,198 @@ def create_sleep_timeline(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def create_sleep_stages_chart(df: pd.DataFrame) -> go.Figure:
-    """Create stacked bar chart for sleep stages."""
+def create_hypnogram(row: pd.Series) -> go.Figure:
+    """Create hypnogram for a single night's sleep."""
+    fig = go.Figure()
+
+    stages = row.get("stages", [])
+    if not stages:
+        fig.add_annotation(
+            text="No stage data available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=14, color="#8E8E93")
+        )
+        fig.update_layout(
+            plot_bgcolor="#1C1C1E",
+            paper_bgcolor="#1C1C1E",
+            height=200
+        )
+        return fig
+
+    # Stage to y-value mapping (higher = lighter sleep)
+    stage_map = {"deep": 0, "rem": 1, "light": 2, "awake": 3}
+    stage_colors = {"deep": COLOR_DEEP, "rem": COLOR_REM, "light": COLOR_LIGHT, "awake": COLOR_AWAKE}
+
+    # Build step chart data
+    x_vals = []
+    y_vals = []
+    colors = []
+
+    for stage in stages:
+        stage_type = stage["stage"]
+        if stage_type not in stage_map:
+            continue
+        y_val = stage_map[stage_type]
+
+        # Add horizontal line for this stage
+        x_vals.extend([stage["start_min"], stage["end_min"]])
+        y_vals.extend([y_val, y_val])
+        colors.append(stage_colors.get(stage_type, "#888"))
+
+    # Create colored segments for each stage
+    for stage in stages:
+        stage_type = stage["stage"]
+        if stage_type not in stage_map:
+            continue
+
+        fig.add_trace(go.Scatter(
+            x=[stage["start_min"], stage["end_min"]],
+            y=[stage_map[stage_type], stage_map[stage_type]],
+            mode="lines",
+            line=dict(color=stage_colors.get(stage_type, "#888"), width=8),
+            hovertemplate=f"{stage_type.title()}: {stage['duration_min']:.0f}m<extra></extra>",
+            showlegend=False,
+        ))
+
+    # Calculate hours for x-axis
+    max_mins = max(s["end_min"] for s in stages) if stages else 480
+    tick_vals = list(range(0, int(max_mins) + 60, 60))
+    tick_text = [f"{m//60}h" for m in tick_vals]
+
+    fig.update_layout(
+        xaxis=dict(
+            title="Time Asleep",
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            tickfont=dict(size=10, color="#8E8E93"),
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+        ),
+        yaxis=dict(
+            tickmode="array",
+            tickvals=[0, 1, 2, 3],
+            ticktext=["Deep", "REM", "Light", "Awake"],
+            tickfont=dict(size=11, color="#FFFFFF"),
+            gridcolor="rgba(255,255,255,0.06)",
+            zeroline=False,
+            range=[-0.5, 3.5],
+        ),
+        height=220,
+        margin=dict(l=60, r=20, t=30, b=40),
+        plot_bgcolor="#1C1C1E",
+        paper_bgcolor="#1C1C1E",
+        font=dict(color="#FFFFFF"),
+    )
+
+    return fig
+
+
+def compute_sleep_variability(df: pd.DataFrame) -> dict:
+    """Compute standard deviations for sleep timing and duration."""
+    local_tz = pytz.timezone(LOCAL_TIMEZONE)
+
+    def time_to_minutes(ts):
+        """Convert timestamp to minutes from midnight (adjusted for overnight)."""
+        if pd.isna(ts):
+            return None
+        if hasattr(ts, 'astimezone'):
+            local_ts = ts.astimezone(local_tz)
+        else:
+            local_ts = ts
+        mins = local_ts.hour * 60 + local_ts.minute
+        # Adjust for overnight (times after midnight but before noon)
+        if mins < 720:  # Before noon
+            mins += 1440  # Add 24 hours
+        return mins
+
+    def compute_sd(values):
+        """Compute standard deviation, return None if insufficient data."""
+        valid = [v for v in values if v is not None]
+        if len(valid) < 2:
+            return None
+        return np.std(valid)
+
+    # Compute onset times (session_start)
+    onset_mins = [time_to_minutes(ts) for ts in df["session_start"]]
+    onset_sd = compute_sd(onset_mins)
+
+    # Compute wake times (sleep_end or session_start + duration)
+    wake_mins = []
+    for _, row in df.iterrows():
+        end_ts = row.get("sleep_end")
+        if pd.notna(end_ts):
+            wake_mins.append(time_to_minutes(end_ts))
+        else:
+            # Estimate from session_start + duration
+            start_ts = row.get("session_start")
+            duration_hrs = row.get("duration_hours", 0)
+            if pd.notna(start_ts) and duration_hrs > 0:
+                start_min = time_to_minutes(start_ts)
+                if start_min is not None:
+                    wake_mins.append(start_min + duration_hrs * 60)
+    wake_sd = compute_sd(wake_mins)
+
+    # Compute midpoint
+    midpoint_mins = []
+    for onset, wake in zip(onset_mins, wake_mins):
+        if onset is not None and wake is not None:
+            midpoint_mins.append((onset + wake) / 2)
+    midpoint_sd = compute_sd(midpoint_mins)
+
+    # Duration SD (in minutes)
+    duration_mins = [d * 60 for d in df["duration_hours"].dropna()]
+    duration_sd = compute_sd(duration_mins)
+
+    return {
+        "onset_sd": onset_sd,
+        "wake_sd": wake_sd,
+        "midpoint_sd": midpoint_sd,
+        "duration_sd": duration_sd,
+    }
+
+
+def create_hr_chart(df: pd.DataFrame) -> go.Figure:
+    """Create heart rate trend chart."""
     fig = go.Figure()
 
     if df.empty:
         return fig
 
-    df = df.sort_values("night_date", ascending=True).tail(14)
+    df = df.sort_values("night_date", ascending=True)
+    df = df.dropna(subset=["heart_rate_avg"])
 
-    dates = [d.strftime("%-m/%-d") for d in df["night_date"]]
+    if df.empty:
+        return fig
 
-    fig.add_trace(go.Bar(
-        name="Deep",
-        x=dates,
-        y=df["deep_minutes"] / 60,
-        marker_color=COLOR_DEEP,
+    fig.add_trace(go.Scatter(
+        x=df["night_date"],
+        y=df["heart_rate_avg"],
+        name="Heart Rate",
+        line=dict(color=COLOR_HR, width=2),
+        mode="lines+markers",
+        marker=dict(size=5),
+        fill="tozeroy",
+        fillcolor="rgba(255, 55, 95, 0.1)",
     ))
-    fig.add_trace(go.Bar(
-        name="REM",
-        x=dates,
-        y=df["rem_minutes"] / 60,
-        marker_color=COLOR_REM,
-    ))
-    fig.add_trace(go.Bar(
-        name="Light",
-        x=dates,
-        y=df["light_minutes"] / 60,
-        marker_color=COLOR_LIGHT,
-    ))
-    fig.add_trace(go.Bar(
-        name="Awake",
-        x=dates,
-        y=df["awake_minutes"] / 60,
-        marker_color=COLOR_AWAKE,
-    ))
+
+    # Add 7-day rolling average
+    if len(df) >= 7:
+        df["hr_rolling"] = df["heart_rate_avg"].rolling(window=7, min_periods=1).mean()
+        fig.add_trace(go.Scatter(
+            x=df["night_date"],
+            y=df["hr_rolling"],
+            name="7-day Avg",
+            line=dict(color="#F59E0B", width=2, dash="dash"),
+            mode="lines",
+        ))
 
     fig.update_layout(
-        barmode="stack",
         xaxis_title="",
-        yaxis_title="Hours",
+        yaxis_title="bpm",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        height=300,
+        height=250,
         margin=dict(l=50, r=20, t=40, b=30),
         plot_bgcolor="#1C1C1E",
         paper_bgcolor="#1C1C1E",
@@ -251,99 +401,46 @@ def create_sleep_stages_chart(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def create_biometrics_chart(df: pd.DataFrame) -> go.Figure:
-    """Create dual-axis chart for HR and HRV."""
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-
-    if df.empty:
-        return fig
-
-    df = df.sort_values("night_date", ascending=True)
-    df = df.dropna(subset=["heart_rate_avg"])
-
-    if df.empty:
-        return fig
-
-    # Heart Rate
-    fig.add_trace(
-        go.Scatter(
-            x=df["night_date"],
-            y=df["heart_rate_avg"],
-            name="Heart Rate",
-            line=dict(color=COLOR_HR, width=2),
-            mode="lines+markers",
-            marker=dict(size=5),
-        ),
-        secondary_y=False,
-    )
-
-    # HRV
-    hrv_df = df.dropna(subset=["hrv_avg"])
-    if not hrv_df.empty:
-        fig.add_trace(
-            go.Scatter(
-                x=hrv_df["night_date"],
-                y=hrv_df["hrv_avg"],
-                name="HRV",
-                line=dict(color=COLOR_HRV, width=2),
-                mode="lines+markers",
-                marker=dict(size=5),
-            ),
-            secondary_y=True,
-        )
-
-    fig.update_xaxes(title_text="", tickfont=dict(color="#8E8E93"))
-    fig.update_yaxes(title_text="Heart Rate (bpm)", secondary_y=False, tickfont=dict(color="#8E8E93"))
-    fig.update_yaxes(title_text="HRV (ms)", secondary_y=True, tickfont=dict(color="#8E8E93"))
-
-    fig.update_layout(
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        height=300,
-        margin=dict(l=50, r=50, t=40, b=30),
-        plot_bgcolor="#1C1C1E",
-        paper_bgcolor="#1C1C1E",
-        font=dict(color="#FFFFFF"),
-    )
-
-    return fig
-
-
-def create_duration_trend(df: pd.DataFrame) -> go.Figure:
-    """Create sleep duration trend with 7-day average."""
+def create_hrv_chart(df: pd.DataFrame) -> go.Figure:
+    """Create HRV trend chart."""
     fig = go.Figure()
 
     if df.empty:
         return fig
 
     df = df.sort_values("night_date", ascending=True)
+    df = df.dropna(subset=["hrv_avg"])
+
+    if df.empty:
+        return fig
 
     fig.add_trace(go.Scatter(
         x=df["night_date"],
-        y=df["duration_hours"],
-        name="Duration",
-        line=dict(color=COLOR_PRIMARY, width=2),
+        y=df["hrv_avg"],
+        name="HRV",
+        line=dict(color=COLOR_HRV, width=2),
         mode="lines+markers",
         marker=dict(size=5),
+        fill="tozeroy",
+        fillcolor="rgba(94, 92, 230, 0.1)",
     ))
 
+    # Add 7-day rolling average
     if len(df) >= 7:
-        df["rolling_avg"] = df["duration_hours"].rolling(window=7, min_periods=1).mean()
+        df["hrv_rolling"] = df["hrv_avg"].rolling(window=7, min_periods=1).mean()
         fig.add_trace(go.Scatter(
             x=df["night_date"],
-            y=df["rolling_avg"],
+            y=df["hrv_rolling"],
             name="7-day Avg",
             line=dict(color="#F59E0B", width=2, dash="dash"),
             mode="lines",
         ))
 
-    # 8-hour target line
-    fig.add_hline(y=8, line=dict(color="rgba(255,255,255,0.3)", dash="dot"))
-
     fig.update_layout(
         xaxis_title="",
-        yaxis_title="Hours",
+        yaxis_title="ms",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        height=300,
+        height=250,
         margin=dict(l=50, r=20, t=40, b=30),
         plot_bgcolor="#1C1C1E",
         paper_bgcolor="#1C1C1E",
@@ -448,11 +545,29 @@ def main():
 
     # === DASHBOARD ===
 
+    # Aggregate sessions by night (sum durations for nights with multiple sessions)
+    daily_df = df.groupby("night_date").agg({
+        "duration_hours": "sum",
+        "deep_minutes": "sum",
+        "rem_minutes": "sum",
+        "light_minutes": "sum",
+        "awake_minutes": "sum",
+        "heart_rate_avg": "mean",
+        "hrv_avg": "mean",
+        "session_start": "first",  # First session of the night
+        "sleep_end": "last",  # Last session end
+    }).reset_index()
+    daily_df = daily_df.sort_values("night_date", ascending=False)
+
+    # Get main sleep session per night for hypnogram (longest session)
+    main_sessions = df.loc[df.groupby("night_date")["duration_hours"].idxmax()]
+
+    local_tz = pytz.timezone(LOCAL_TIMEZONE)
+
     # Last Night Summary
     st.header("Last Night")
 
-    last_night = df.iloc[0]
-    local_tz = pytz.timezone(LOCAL_TIMEZONE)
+    last_night = daily_df.iloc[0]
 
     col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -473,73 +588,105 @@ def main():
 
     with col4:
         hr = last_night.get("heart_rate_avg")
-        st.metric("Avg Heart Rate", f"{hr:.0f} bpm" if hr else "N/A")
+        st.metric("Avg Heart Rate", f"{hr:.0f} bpm" if hr and not pd.isna(hr) else "N/A")
 
     with col5:
         hrv = last_night.get("hrv_avg")
-        st.metric("HRV", f"{hrv:.0f} ms" if hrv else "N/A")
+        st.metric("HRV", f"{hrv:.0f} ms" if hrv and not pd.isna(hrv) else "N/A")
 
     st.divider()
 
-    # Averages
+    # Averages (from daily aggregates)
     st.header(f"{days}-Day Averages")
+
+    num_nights = len(daily_df)
+    avg_dur = daily_df["duration_hours"].mean()
+    avg_deep = daily_df["deep_minutes"].mean()
+    avg_rem = daily_df["rem_minutes"].mean()
+    avg_total = avg_dur * 60 if avg_dur > 0 else 1
+    avg_deep_pct = (avg_deep / avg_total) * 100
+    avg_rem_pct = (avg_rem / avg_total) * 100
 
     col1, col2, col3, col4, col5, col6 = st.columns(6)
 
     with col1:
-        avg_dur = df["duration_hours"].mean()
         st.metric("Avg Sleep", f"{avg_dur:.1f}h")
 
     with col2:
-        avg_deep = df["deep_minutes"].mean()
-        avg_total = avg_dur * 60 if avg_dur > 0 else 1
-        avg_deep_pct = (avg_deep / avg_total) * 100
         st.metric("Avg Deep", f"{avg_deep:.0f}m ({avg_deep_pct:.0f}%)")
 
     with col3:
-        avg_rem = df["rem_minutes"].mean()
-        avg_rem_pct = (avg_rem / avg_total) * 100
         st.metric("Avg REM", f"{avg_rem:.0f}m ({avg_rem_pct:.0f}%)")
 
     with col4:
-        avg_hr = df["heart_rate_avg"].dropna().mean()
+        avg_hr = daily_df["heart_rate_avg"].dropna().mean()
         st.metric("Avg HR", f"{avg_hr:.0f} bpm" if not pd.isna(avg_hr) else "N/A")
 
     with col5:
-        avg_hrv = df["hrv_avg"].dropna().mean()
+        avg_hrv = daily_df["hrv_avg"].dropna().mean()
         st.metric("Avg HRV", f"{avg_hrv:.0f} ms" if not pd.isna(avg_hrv) else "N/A")
 
     with col6:
-        st.metric("Nights Tracked", len(df))
+        st.metric("Nights Tracked", num_nights)
 
     st.divider()
 
-    # Sleep Timeline
+    # Sleep Timeline (last 14 days)
     st.header("Sleep Timeline")
-    fig = create_sleep_timeline(df)
+    timeline_df = daily_df.head(14).copy()
+    # Need session_start for timeline - use raw df
+    timeline_raw = df[df["night_date"].isin(timeline_df["night_date"])]
+    fig = create_sleep_timeline(timeline_raw)
     st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
-    # Charts Row
+    # Hypnogram and Sleep Variability
     col1, col2 = st.columns(2)
 
     with col1:
-        st.subheader("Sleep Stages")
-        fig = create_sleep_stages_chart(df)
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Last Night Hypnogram")
+        # Get the main session for last night
+        last_main = main_sessions.iloc[0] if not main_sessions.empty else None
+        if last_main is not None and "stages" in last_main and last_main["stages"]:
+            fig = create_hypnogram(last_main)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No hypnogram data available")
 
     with col2:
-        st.subheader("Duration Trend")
-        fig = create_duration_trend(df)
-        st.plotly_chart(fig, use_container_width=True)
+        st.subheader("Sleep Schedule Variability")
+        variability = compute_sleep_variability(df)
+
+        m1, m2 = st.columns(2)
+        with m1:
+            onset_sd = variability.get("onset_sd")
+            st.metric("Onset SD", f"{onset_sd:.0f} min" if onset_sd else "N/A")
+            midpoint_sd = variability.get("midpoint_sd")
+            st.metric("Midpoint SD", f"{midpoint_sd:.0f} min" if midpoint_sd else "N/A")
+
+        with m2:
+            wake_sd = variability.get("wake_sd")
+            st.metric("Wake SD", f"{wake_sd:.0f} min" if wake_sd else "N/A")
+            duration_sd = variability.get("duration_sd")
+            st.metric("Duration SD", f"{duration_sd:.0f} min" if duration_sd else "N/A")
+
+        st.caption("Lower SD = more consistent sleep schedule")
 
     st.divider()
 
-    # Biometrics
-    st.header("Heart Rate & HRV")
-    fig = create_biometrics_chart(df)
-    st.plotly_chart(fig, use_container_width=True)
+    # Heart Rate and HRV (separate charts)
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Heart Rate")
+        fig = create_hr_chart(daily_df)
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("HRV")
+        fig = create_hrv_chart(daily_df)
+        st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
 
@@ -547,12 +694,12 @@ def main():
     st.header("AI Analysis")
 
     sleep_summary = {
-        "total_nights": len(df),
-        "avg_duration": f"{df['duration_hours'].mean():.1f}",
-        "avg_deep": f"{df['deep_minutes'].mean():.0f}",
-        "avg_rem": f"{df['rem_minutes'].mean():.0f}",
-        "avg_hr": f"{df['heart_rate_avg'].dropna().mean():.0f}" if not df['heart_rate_avg'].dropna().empty else "N/A",
-        "avg_hrv": f"{df['hrv_avg'].dropna().mean():.0f}" if not df['hrv_avg'].dropna().empty else "N/A",
+        "total_nights": num_nights,
+        "avg_duration": f"{avg_dur:.1f}",
+        "avg_deep": f"{avg_deep:.0f}",
+        "avg_rem": f"{avg_rem:.0f}",
+        "avg_hr": f"{avg_hr:.0f}" if not pd.isna(avg_hr) else "N/A",
+        "avg_hrv": f"{avg_hrv:.0f}" if not pd.isna(avg_hrv) else "N/A",
     }
 
     if st.button("Generate Analysis", type="primary"):
