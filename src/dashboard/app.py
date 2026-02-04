@@ -287,8 +287,24 @@ def create_hypnogram(row: pd.Series) -> go.Figure:
 
 
 def compute_sleep_variability(df: pd.DataFrame) -> dict:
-    """Compute standard deviations for sleep timing and duration."""
+    """Compute standard deviations for sleep timing and duration.
+
+    Only uses main sleep sessions (longest per night, started 6PM-6AM).
+    """
     local_tz = pytz.timezone(LOCAL_TIMEZONE)
+
+    def is_main_sleep(row):
+        """Check if session is likely main sleep (started 6 PM - 6 AM)."""
+        ts = row.get("session_start")
+        if pd.isna(ts):
+            return False
+        if hasattr(ts, 'astimezone'):
+            local_ts = ts.astimezone(local_tz)
+        else:
+            local_ts = ts
+        hour = local_ts.hour
+        # Main sleep typically starts between 6 PM (18) and 6 AM (6)
+        return hour >= 18 or hour < 6
 
     def time_to_minutes(ts):
         """Convert timestamp to minutes from midnight (adjusted for overnight)."""
@@ -299,8 +315,8 @@ def compute_sleep_variability(df: pd.DataFrame) -> dict:
         else:
             local_ts = ts
         mins = local_ts.hour * 60 + local_ts.minute
-        # Adjust for overnight (times after midnight but before noon)
-        if mins < 720:  # Before noon
+        # Adjust for overnight (times after midnight but before 6 AM become 24:xx - 30:xx)
+        if local_ts.hour < 6:
             mins += 1440  # Add 24 hours
         return mins
 
@@ -311,24 +327,29 @@ def compute_sleep_variability(df: pd.DataFrame) -> dict:
             return None
         return np.std(valid)
 
+    # Filter to main sleep sessions only
+    main_df = df[df.apply(is_main_sleep, axis=1)].copy()
+
+    # If multiple sessions per night, keep the longest
+    if not main_df.empty:
+        main_df = main_df.loc[main_df.groupby("night_date")["duration_hours"].idxmax()]
+
+    if main_df.empty:
+        return {"onset_sd": None, "wake_sd": None, "midpoint_sd": None, "duration_sd": None}
+
     # Compute onset times (session_start)
-    onset_mins = [time_to_minutes(ts) for ts in df["session_start"]]
+    onset_mins = [time_to_minutes(ts) for ts in main_df["session_start"]]
     onset_sd = compute_sd(onset_mins)
 
-    # Compute wake times (sleep_end or session_start + duration)
+    # Compute wake times (session_start + duration)
     wake_mins = []
-    for _, row in df.iterrows():
-        end_ts = row.get("sleep_end")
-        if pd.notna(end_ts):
-            wake_mins.append(time_to_minutes(end_ts))
-        else:
-            # Estimate from session_start + duration
-            start_ts = row.get("session_start")
-            duration_hrs = row.get("duration_hours", 0)
-            if pd.notna(start_ts) and duration_hrs > 0:
-                start_min = time_to_minutes(start_ts)
-                if start_min is not None:
-                    wake_mins.append(start_min + duration_hrs * 60)
+    for _, row in main_df.iterrows():
+        start_ts = row.get("session_start")
+        duration_hrs = row.get("duration_hours", 0)
+        if pd.notna(start_ts) and duration_hrs > 0:
+            start_min = time_to_minutes(start_ts)
+            if start_min is not None:
+                wake_mins.append(start_min + duration_hrs * 60)
     wake_sd = compute_sd(wake_mins)
 
     # Compute midpoint
