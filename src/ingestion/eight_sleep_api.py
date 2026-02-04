@@ -231,6 +231,9 @@ class EightSleepClient:
                 session_start = pd.to_datetime(ts_str)
                 if session_start.tzinfo is None:
                     session_start = self.local_tz.localize(session_start)
+                else:
+                    # Convert to local timezone for proper night assignment
+                    session_start = session_start.astimezone(self.local_tz)
             except Exception:
                 continue
 
@@ -290,8 +293,17 @@ class EightSleepClient:
                 })
                 cumulative_mins += duration_mins
 
+            # Determine night_date based on local time:
+            # - If session starts before 6 PM, it belongs to previous night (woke up that morning)
+            # - If session starts at/after 6 PM, it belongs to that night (going to bed)
+            local_hour = session_start.hour
+            if local_hour < 18:  # Before 6 PM - assign to previous night
+                night_date = session_start.date() - timedelta(days=1)
+            else:  # 6 PM or later - assign to current night
+                night_date = session_start.date()
+
             sessions.append({
-                "night_date": session_start.date() - timedelta(days=1),  # Assign to previous night
+                "night_date": night_date,
                 "session_start": session_start,
                 "sleep_start": sleep_start,
                 "sleep_end": sleep_end,

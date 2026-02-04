@@ -1,6 +1,11 @@
 """Application configuration."""
 
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file from project root
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 # GCP Settings
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "sleep-health-dashboard")

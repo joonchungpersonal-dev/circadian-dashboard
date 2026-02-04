@@ -232,16 +232,17 @@ def create_sleep_timeline(df: pd.DataFrame) -> go.Figure:
         sunrise_time = f"{int(sunrise_hour)}:{int((sunrise_hour % 1) * 60):02d} AM"
         sunrise_texts.append(f"Sunrise: {sunrise_time}")
 
-    # Add sunrise markers (sun symbols)
+    # Add sunrise markers (subtle diamond)
     fig.add_trace(go.Scatter(
         x=sunrise_x,
         y=sunrise_y,
         mode="markers",
         marker=dict(
-            symbol="star",
-            size=14,
-            color=COLOR_SUNRISE,
-            line=dict(width=1, color="#FF9500"),
+            symbol="diamond",
+            size=8,
+            color="#FFA726",
+            opacity=0.8,
+            line=dict(width=1, color="#FFB74D"),
         ),
         hovertemplate="%{customdata}<extra></extra>",
         customdata=sunrise_texts,
@@ -312,6 +313,35 @@ def create_hypnogram(row: pd.Series) -> go.Figure:
     # Stage to y-value mapping (higher = lighter sleep)
     stage_map = {"deep": 0, "rem": 1, "light": 2, "awake": 3}
     stage_colors = {"deep": COLOR_DEEP, "rem": COLOR_REM, "light": COLOR_LIGHT, "awake": COLOR_AWAKE}
+
+    # Find first actual sleep stage (skip initial awake/in-bed time)
+    sleep_start_offset = 0
+    for stage in stages:
+        if stage["stage"] in ("deep", "light", "rem"):
+            sleep_start_offset = stage["start_min"]
+            break
+
+    # Filter out trailing awake period and adjust times
+    filtered_stages = []
+    for stage in stages:
+        adjusted_start = stage["start_min"] - sleep_start_offset
+        adjusted_end = stage["end_min"] - sleep_start_offset
+        # Skip stages that are entirely before sleep started
+        if adjusted_end <= 0:
+            continue
+        # Clip start to 0 if it's negative
+        adjusted_start = max(0, adjusted_start)
+        filtered_stages.append({
+            **stage,
+            "start_min": adjusted_start,
+            "end_min": adjusted_end,
+        })
+
+    # Remove trailing awake period (after last sleep stage)
+    if filtered_stages and filtered_stages[-1]["stage"] == "awake":
+        filtered_stages = filtered_stages[:-1]
+
+    stages = filtered_stages
 
     # Build step chart data for connecting line
     line_x = []
@@ -1176,6 +1206,11 @@ def main():
         st.error("Could not load data. Check your credentials and try again.")
         return
 
+    # Filter out nights with insufficient data (aggregate first, then filter)
+    night_totals = df.groupby("night_date")["duration_hours"].sum()
+    valid_nights = night_totals[night_totals >= 4.0].index
+    df = df[df["night_date"].isin(valid_nights)]
+
     # === DASHBOARD ===
 
     # Aggregate sessions by night (sum durations for nights with multiple sessions)
@@ -1191,6 +1226,9 @@ def main():
         "sleep_end": "last",  # Last session end
     }).reset_index()
     daily_df = daily_df.sort_values("night_date", ascending=False)
+
+    # Filter out incomplete nights (less than 4 hours total sleep)
+    daily_df = daily_df[daily_df["duration_hours"] >= 4.0]
 
     # Get main sleep session per night for hypnogram (longest session)
     main_sessions = df.loc[df.groupby("night_date")["duration_hours"].idxmax()]
