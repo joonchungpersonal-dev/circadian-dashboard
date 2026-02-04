@@ -33,6 +33,10 @@ MAX_SLEEP_GAP_MINUTES = 120  # Merge sessions with gaps smaller than this
 # Timezone
 LOCAL_TIMEZONE = "America/New_York"
 
+# Location for sunrise/sunset calculations (default: Boston)
+LATITUDE = float(os.getenv("LATITUDE", "42.3601"))
+LONGITUDE = float(os.getenv("LONGITUDE", "-71.0589"))
+
 # Dashboard defaults
 DEFAULT_DATE_RANGE_DAYS = 30
 AGREEMENT_THRESHOLD_GOOD = 90  # Agreement score above this is "good"
