@@ -479,6 +479,69 @@ def create_hrv_chart(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+def create_correlation_scatter(df: pd.DataFrame, x_col: str, y_col: str,
+                               x_label: str, y_label: str, color: str) -> go.Figure:
+    """Create a scatter plot with correlation line and coefficient."""
+    fig = go.Figure()
+
+    if df.empty or x_col not in df.columns or y_col not in df.columns:
+        return fig
+
+    # Drop rows with missing values
+    plot_df = df[[x_col, y_col]].dropna()
+    if len(plot_df) < 3:
+        return fig
+
+    x = plot_df[x_col]
+    y = plot_df[y_col]
+
+    # Calculate correlation
+    corr = x.corr(y)
+
+    # Add scatter points
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode="markers",
+        marker=dict(color=color, size=10, opacity=0.7),
+        hovertemplate=f"{x_label}: %{{x:.1f}}<br>{y_label}: %{{y:.1f}}<extra></extra>",
+        showlegend=False,
+    ))
+
+    # Add trend line
+    if len(x) >= 2:
+        z = np.polyfit(x, y, 1)
+        p = np.poly1d(z)
+        x_line = np.linspace(x.min(), x.max(), 50)
+        fig.add_trace(go.Scatter(
+            x=x_line,
+            y=p(x_line),
+            mode="lines",
+            line=dict(color="rgba(255,255,255,0.5)", width=2, dash="dash"),
+            showlegend=False,
+        ))
+
+    fig.update_layout(
+        title=dict(
+            text=f"r = {corr:.2f}",
+            font=dict(size=14, color="#FFFFFF"),
+            x=0.5,
+            xanchor="center",
+        ),
+        xaxis_title=x_label,
+        yaxis_title=y_label,
+        height=250,
+        margin=dict(l=50, r=20, t=40, b=40),
+        plot_bgcolor="#1C1C1E",
+        paper_bgcolor="#1C1C1E",
+        font=dict(color="#FFFFFF"),
+        xaxis=dict(tickfont=dict(color="#8E8E93"), gridcolor="rgba(255,255,255,0.06)"),
+        yaxis=dict(tickfont=dict(color="#8E8E93"), gridcolor="rgba(255,255,255,0.06)"),
+    )
+
+    return fig
+
+
 def get_llm_analysis(sleep_data: dict) -> str:
     """Get sleep analysis from local Qwen model."""
     try:
@@ -713,6 +776,48 @@ def main():
     with col2:
         st.subheader("HRV")
         fig = create_hrv_chart(daily_df)
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.divider()
+
+    # Correlations
+    st.header("Correlations")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Duration vs REM")
+        fig = create_correlation_scatter(
+            daily_df, "duration_hours", "rem_minutes",
+            "Duration (hours)", "REM (minutes)", COLOR_REM
+        )
+        st.plotly_chart(fig, use_container_width=True)
+        st.caption("Longer sleep = more REM sleep")
+
+    with col2:
+        st.subheader("HRV vs Heart Rate")
+        fig = create_correlation_scatter(
+            daily_df, "hrv_avg", "heart_rate_avg",
+            "HRV (ms)", "Heart Rate (bpm)", COLOR_HR
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("HRV vs Awake Time")
+        fig = create_correlation_scatter(
+            daily_df, "hrv_avg", "awake_minutes",
+            "HRV (ms)", "Awake (minutes)", COLOR_AWAKE
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        st.subheader("Duration vs Deep Sleep")
+        fig = create_correlation_scatter(
+            daily_df, "duration_hours", "deep_minutes",
+            "Duration (hours)", "Deep (minutes)", COLOR_DEEP
+        )
         st.plotly_chart(fig, use_container_width=True)
 
     st.divider()
