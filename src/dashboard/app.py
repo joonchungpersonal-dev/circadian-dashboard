@@ -748,20 +748,33 @@ def main():
         st.subheader("Sleep Schedule Variability")
         variability = compute_sleep_variability(df)
 
+        def format_sd(value, label):
+            """Format SD value with green/red indicator."""
+            if value is None:
+                return f"{label}: N/A"
+            status = "🟢" if value < 60 else "🔴"
+            return f"{status} {label}: {value:.0f} min"
+
         m1, m2 = st.columns(2)
         with m1:
             onset_sd = variability.get("onset_sd")
-            st.metric("Onset SD", f"{onset_sd:.0f} min" if onset_sd else "N/A")
+            status = "🟢 Good" if onset_sd and onset_sd < 60 else "🔴 High" if onset_sd else ""
+            st.metric("Onset SD", f"{onset_sd:.0f} min" if onset_sd else "N/A", delta=status, delta_color="off")
+
             midpoint_sd = variability.get("midpoint_sd")
-            st.metric("Midpoint SD", f"{midpoint_sd:.0f} min" if midpoint_sd else "N/A")
+            status = "🟢 Good" if midpoint_sd and midpoint_sd < 60 else "🔴 High" if midpoint_sd else ""
+            st.metric("Midpoint SD", f"{midpoint_sd:.0f} min" if midpoint_sd else "N/A", delta=status, delta_color="off")
 
         with m2:
             wake_sd = variability.get("wake_sd")
-            st.metric("Wake SD", f"{wake_sd:.0f} min" if wake_sd else "N/A")
-            duration_sd = variability.get("duration_sd")
-            st.metric("Duration SD", f"{duration_sd:.0f} min" if duration_sd else "N/A")
+            status = "🟢 Good" if wake_sd and wake_sd < 60 else "🔴 High" if wake_sd else ""
+            st.metric("Wake SD", f"{wake_sd:.0f} min" if wake_sd else "N/A", delta=status, delta_color="off")
 
-        st.caption("Lower SD = more consistent sleep schedule")
+            duration_sd = variability.get("duration_sd")
+            status = "🟢 Good" if duration_sd and duration_sd < 60 else "🔴 High" if duration_sd else ""
+            st.metric("Duration SD", f"{duration_sd:.0f} min" if duration_sd else "N/A", delta=status, delta_color="off")
+
+        st.caption("🟢 < 60 min = consistent | 🔴 >= 60 min = variable")
 
     st.divider()
 
