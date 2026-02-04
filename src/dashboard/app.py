@@ -365,8 +365,8 @@ def compute_sleep_variability(df: pd.DataFrame) -> dict:
             midpoint_mins.append((onset + wake) / 2)
     midpoint_sd = compute_sd(midpoint_mins)
 
-    # Duration SD (in minutes)
-    duration_mins = [d * 60 for d in df["duration_hours"].dropna()]
+    # Duration SD (in minutes) - use filtered main_df
+    duration_mins = [d * 60 for d in main_df["duration_hours"].dropna()]
     duration_sd = compute_sd(duration_mins)
 
     return {
